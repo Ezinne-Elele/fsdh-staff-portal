@@ -6,6 +6,10 @@ import {
   CardContent,
   Typography,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   TextField,
   InputAdornment,
   Table,
@@ -28,8 +32,6 @@ import {
   Hash,
   FileDown,
   CheckCircle2,
-  XCircle,
-  Bell,
 } from 'lucide-react';
 import { tradeService } from '../../services/tradeService';
 import { counterpartyService } from '../../services/counterpartyService';
@@ -59,6 +61,7 @@ export default function TradeOperations() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [formData, setFormData] = useState(() => createInitialForm());
   const [formErrors, setFormErrors] = useState({});
+  const [isCaptureDialogOpen, setCaptureDialogOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [exceptions, setExceptions] = useState([]);
@@ -173,6 +176,7 @@ export default function TradeOperations() {
       setFormErrors({});
       addNotification(`Trade ${newTrade.tradeId} captured`, 'success');
       recordAudit('captured', newTrade.tradeId, `Created ${newTrade.tradeType} trade for ${newTrade.clientId}`);
+      setCaptureDialogOpen(false);
       await fetchTrades(); // Refresh to get latest data
     } catch (err) {
       setError(err.message || 'Failed to create trade');
@@ -331,6 +335,178 @@ export default function TradeOperations() {
 
   return (
     <Box>
+      <Dialog
+        open={isCaptureDialogOpen}
+        onClose={() => setCaptureDialogOpen(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700 }}>
+          Quick Capture Trade
+        </DialogTitle>
+        <DialogContent dividers>
+          <Box
+            component="form"
+            id="trade-capture-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleCaptureTrade();
+            }}
+          >
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Account ID"
+                  name="accountId"
+                  value={formData.accountId}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.accountId)}
+                  helperText={formErrors.accountId || 'Account where trade will be settled'}
+                  fullWidth
+                  required
+                  placeholder="ACC-CLIENT-XXX-SEC"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Client ID"
+                  name="clientId"
+                  value={formData.clientId}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.clientId)}
+                  helperText={formErrors.clientId}
+                  fullWidth
+                  required
+                  placeholder="CLIENT-XXX"
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="ISIN"
+                  name="isin"
+                  value={formData.isin}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.isin)}
+                  helperText={formErrors.isin}
+                  fullWidth
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Button size="small" onClick={handleGenerateIsin} startIcon={<Hash size={14} />}>
+                          Generate
+                        </Button>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Trade Date"
+                  type="date"
+                  name="tradeDate"
+                  value={formData.tradeDate}
+                  onChange={handleFormChange}
+                  InputLabelProps={{ shrink: true }}
+                  error={Boolean(formErrors.tradeDate)}
+                  helperText={formErrors.tradeDate}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Settlement Date"
+                  type="date"
+                  name="settlementDate"
+                  value={formData.settlementDate}
+                  onChange={handleFormChange}
+                  InputLabelProps={{ shrink: true }}
+                  error={Boolean(formErrors.settlementDate)}
+                  helperText={formErrors.settlementDate}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  select
+                  name="tradeType"
+                  label="Trade Type"
+                  value={formData.tradeType}
+                  onChange={handleFormChange}
+                  fullWidth
+                  SelectProps={{ native: true }}
+                >
+                  <option value="buy">Buy</option>
+                  <option value="sell">Sell</option>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  select
+                  name="counterpartyId"
+                  label="Counterparty"
+                  value={formData.counterpartyId}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.counterpartyId)}
+                  helperText={
+                    formErrors.counterpartyId
+                      ? formErrors.counterpartyId
+                      : formData.counterpartyId
+                        ? `Counterparty ID: ${formData.counterpartyId}`
+                        : 'Select a counterparty'
+                  }
+                  fullWidth
+                  required
+                  SelectProps={{ native: true }}
+                >
+                  <option value="">-- Select Counterparty --</option>
+                  {counterparties.map((cp) => (
+                    <option key={cp.counterpartyId} value={cp.counterpartyId}>
+                      {cp.counterpartyId} - {cp.name}
+                    </option>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Quantity"
+                  name="quantity"
+                  type="number"
+                  value={formData.quantity}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.quantity)}
+                  helperText={formErrors.quantity}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Price"
+                  name="price"
+                  type="number"
+                  value={formData.price}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.price)}
+                  helperText={formErrors.price}
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCaptureDialogOpen(false)}>Cancel</Button>
+          <Button
+            type="submit"
+            form="trade-capture-form"
+            variant="contained"
+            startIcon={<Plus size={16} />}
+          >
+            Save Draft
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} gap={2} mb={3}>
         <Box>
           <Typography variant="h4" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700, color: 'hsl(222, 47%, 11%)' }}>
@@ -349,7 +525,15 @@ export default function TradeOperations() {
           >
             {loading ? 'Loading…' : 'Refresh'}
           </Button>
-          <Button variant="contained" startIcon={<Plus size={16} />} onClick={handleCaptureTrade}>
+          <Button
+            variant="contained"
+            startIcon={<Plus size={16} />}
+            onClick={() => {
+              setFormData(createInitialForm());
+              setFormErrors({});
+              setCaptureDialogOpen(true);
+            }}
+          >
             Quick Capture
           </Button>
         </Box>
@@ -364,220 +548,6 @@ export default function TradeOperations() {
         </Grid>
         <Grid item xs={12} md={4}>
           <StatCard title="Settled" value={settledTrades.toLocaleString()} />
-        </Grid>
-      </Grid>
-
-      <Grid container spacing={2} mb={3}>
-        <Grid item xs={12} md={7}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 2 }}>
-                Capture Trade
-              </Typography>
-              <Box component="form" onSubmit={(event) => { event.preventDefault(); handleCaptureTrade(); }}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Account ID"
-                      name="accountId"
-                      value={formData.accountId}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.accountId)}
-                      helperText={formErrors.accountId || 'Account where trade will be settled'}
-                      fullWidth
-                      required
-                      placeholder="ACC-CLIENT-XXX-SEC"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Client ID"
-                      name="clientId"
-                      value={formData.clientId}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.clientId)}
-                      helperText={formErrors.clientId}
-                      fullWidth
-                      required
-                      placeholder="CLIENT-XXX"
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="ISIN"
-                      name="isin"
-                      value={formData.isin}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.isin)}
-                      helperText={formErrors.isin}
-                      fullWidth
-                      InputProps={{
-                        endAdornment: (
-                          <InputAdornment position="end">
-                            <Button size="small" onClick={handleGenerateIsin} startIcon={<Hash size={14} />}>
-                              Generate
-                            </Button>
-                          </InputAdornment>
-                        ),
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Trade Date"
-                      type="date"
-                      name="tradeDate"
-                      value={formData.tradeDate}
-                      onChange={handleFormChange}
-                      InputLabelProps={{ shrink: true }}
-                      error={Boolean(formErrors.tradeDate)}
-                      helperText={formErrors.tradeDate}
-                      fullWidth
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Settlement Date"
-                      type="date"
-                      name="settlementDate"
-                      value={formData.settlementDate}
-                      onChange={handleFormChange}
-                      InputLabelProps={{ shrink: true }}
-                      error={Boolean(formErrors.settlementDate)}
-                      helperText={formErrors.settlementDate}
-                      fullWidth
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      select
-                      name="tradeType"
-                      label="Trade Type"
-                      value={formData.tradeType}
-                      onChange={handleFormChange}
-                      fullWidth
-                      SelectProps={{ native: true }}
-                    >
-                      <option value="buy">Buy</option>
-                      <option value="sell">Sell</option>
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      select
-                      name="counterpartyId"
-                      label="Counterparty"
-                      value={formData.counterpartyId}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.counterpartyId)}
-                      helperText={
-                        formErrors.counterpartyId 
-                          ? formErrors.counterpartyId 
-                          : formData.counterpartyId 
-                            ? `Counterparty ID: ${formData.counterpartyId}` 
-                            : 'Select a counterparty'
-                      }
-                      fullWidth
-                      required
-                      SelectProps={{ native: true }}
-                    >
-                      <option value="">-- Select Counterparty --</option>
-                      {counterparties.map((cp) => (
-                        <option key={cp.counterpartyId} value={cp.counterpartyId}>
-                          {cp.counterpartyId} - {cp.name}
-                        </option>
-                      ))}
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Quantity"
-                      name="quantity"
-                      type="number"
-                      value={formData.quantity}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.quantity)}
-                      helperText={formErrors.quantity}
-                      fullWidth
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Price"
-                      name="price"
-                      type="number"
-                      value={formData.price}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.price)}
-                      helperText={formErrors.price}
-                      fullWidth
-                    />
-                  </Grid>
-                </Grid>
-                <Stack direction="row" justifyContent="flex-end" spacing={1} mt={3}>
-                  <Button type="submit" variant="contained" startIcon={<Plus size={16} />}>
-                    Save Draft
-                  </Button>
-                </Stack>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={5}>
-          <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 1 }}>
-                Notifications
-              </Typography>
-              {notifications.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No notifications
-                </Typography>
-              ) : (
-                <Stack spacing={1}>
-                  {notifications.map((note) => (
-                    <Alert
-                      key={note.id}
-                      severity={note.severity}
-                      icon={<Bell size={16} />}
-                      onClose={() => dismissNotification(note.id)}
-                    >
-                      <Typography variant="body2">{note.message}</Typography>
-                      <Typography variant="caption">{note.timestamp.toLocaleTimeString()}</Typography>
-                    </Alert>
-                  ))}
-                </Stack>
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 1 }}>
-                Exceptions
-              </Typography>
-              {exceptions.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No open exceptions
-                </Typography>
-              ) : (
-                <Stack spacing={1}>
-                  {exceptions.map((exc) => (
-                    <Alert
-                      key={exc.id}
-                      severity="error"
-                      icon={<XCircle size={16} />}
-                      onClose={() => dismissException(exc.id)}
-                    >
-                      <Typography variant="body2">
-                        Trade {exc.tradeId}: {exc.reason}
-                      </Typography>
-                      <Typography variant="caption">{exc.timestamp.toLocaleTimeString()}</Typography>
-                    </Alert>
-                  ))}
-                </Stack>
-              )}
-            </CardContent>
-          </Card>
         </Grid>
       </Grid>
 

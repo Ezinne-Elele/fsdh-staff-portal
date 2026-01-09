@@ -105,7 +105,7 @@ export default function Dashboard() {
       </Typography>
 
       <Grid container spacing={2} mb={3}>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Total Assets"
             value={currencyFormatter.format(Number(totals.assets || 0))}
@@ -113,21 +113,21 @@ export default function Dashboard() {
             footer="Client portfolios under custody"
           />
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Cash Balances"
             value={currencyFormatter.format(Number(totals.cash || 0))}
             icon={<PiggyBank size={18} />}
           />
         </Grid>
-        <Grid item xs={12} md={2}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Active Clients"
             value={(totals.clients || 0).toLocaleString()}
             icon={<Users size={18} />}
           />
         </Grid>
-        <Grid item xs={12} md={2}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Pending Instructions"
             value={(instructions.pendingApproval || 0).toLocaleString()}
@@ -135,14 +135,14 @@ export default function Dashboard() {
             footer={`${instructions.completed || 0} completed`}
           />
         </Grid>
-        <Grid item xs={12} md={2}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Pending Settlements"
             value={(trades.pendingSettlements || 0).toLocaleString()}
             icon={<Repeat size={18} />}
           />
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Settlement Rate"
             value={`${trades.settlementRate || 0}%`}
@@ -150,21 +150,21 @@ export default function Dashboard() {
             footer={`Today's volume ${currencyFormatter.format(Number(trades.todaysVolume || 0))}`}
           />
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Open Exceptions"
             value={(alerts.openExceptions || 0).toLocaleString()}
             icon={<AlertTriangle size={18} />}
           />
         </Grid>
-        <Grid item xs={12} md={2}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Pending Recons"
             value={(alerts.pendingReconciliations || 0).toLocaleString()}
             icon={<Repeat size={18} />}
           />
         </Grid>
-        <Grid item xs={12} md={2}>
+        <Grid item xs={12} sm={6} md={4} lg={4}>
           <StatCard
             title="Upcoming Corp Actions"
             value={(alerts.upcomingCorporateActions || 0).toLocaleString()}
@@ -174,36 +174,8 @@ export default function Dashboard() {
       </Grid>
 
       <Grid container spacing={2}>
-        <Grid item xs={12} md={7}>
-          <Card sx={{ border: '1px solid hsl(214, 32%, 91%)', height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 1 }}>
-                Settlement Volume (7 days)
-              </Typography>
-              <Typography variant="body2" color="text.secondary" mb={2}>
-                Trend of settled trades by value
-              </Typography>
-              <Box height={280}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={settlementSeries}>
-                    <defs>
-                      <linearGradient id="settlementColor" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(221, 83%, 53%)" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(221, 83%, 53%)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" />
-                    <XAxis dataKey="date" stroke="hsl(222, 20%, 60%)" />
-                    <Tooltip />
-                    <Area type="monotone" dataKey="value" stroke="hsl(221, 83%, 53%)" strokeWidth={2} fillOpacity={1} fill="url(#settlementColor)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={5}>
-          <Card sx={{ border: '1px solid hsl(214, 32%, 91%)', height: '100%' }}>
+        <Grid item xs={12}>
+          <Card   sx={{ border: '1px solid hsl(214, 32%, 91%)', height: '100%', width: '100%' }}>
             <CardContent>
               <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 1 }}>
                 Recent Activity

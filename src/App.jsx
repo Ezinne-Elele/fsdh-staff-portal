@@ -13,6 +13,7 @@ import InstrumentCoverage from './pages/Instruments/InstrumentCoverage';
 import Reconciliations from './pages/Reconciliations/Reconciliations';
 import Exceptions from './pages/Exceptions/Exceptions';
 import Clients from './pages/Clients/Clients';
+import ClientDetail from './pages/Clients/ClientDetail';
 import Users from './pages/Users/Users';
 import Reports from './pages/Reports/Reports';
 import Compliance from './pages/Compliance/Compliance';
@@ -55,6 +56,7 @@ function App() {
         <Route path="reconciliations" element={<Reconciliations />} />
         <Route path="exceptions" element={<Exceptions />} />
         <Route path="clients" element={<Clients />} />
+        <Route path="clients/:clientId" element={<ClientDetail />} />
         <Route path="users" element={<Users />} />
         <Route path="reports" element={<Reports />} />
         <Route path="billing" element={<Billing />} />
