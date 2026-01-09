@@ -31,7 +31,8 @@ import {
   XCircle,
   Bell,
 } from 'lucide-react';
-// Using mock data - no backend API calls
+import { tradeService } from '../../services/tradeService';
+import { counterpartyService } from '../../services/counterpartyService';
 
 const statusColors = {
   draft: { bg: 'hsl(210, 40%, 98%)', color: 'hsl(222, 20%, 40%)' },
@@ -61,19 +62,50 @@ export default function TradeOperations() {
   const [notifications, setNotifications] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [exceptions, setExceptions] = useState([]);
-  const [syncing, setSyncing] = useState(false);
+  const [counterparties, setCounterparties] = useState([]);
 
   useEffect(() => {
-    setLoading(true);
-    setTimeout(() => {
-      const mockTrades = generateMockTrades();
-      setTrades(mockTrades);
-      setLoading(false);
-    }, 300);
+    fetchTrades();
+    fetchCounterparties();
   }, []);
 
+  const fetchCounterparties = async () => {
+    try {
+      const response = await counterpartyService.getCounterparties({ status: 'active', limit: 100 });
+      setCounterparties(response.counterparties || []);
+    } catch (err) {
+      console.error('Error fetching counterparties:', err);
+      addNotification('Failed to load counterparties. Please refresh the page.', 'warning');
+      // Set empty array - user will need to refresh
+      setCounterparties([]);
+    }
+  };
+
+  const fetchTrades = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await tradeService.getTrades({ page: 1, limit: 100 });
+      setTrades(response.trades || []);
+    } catch (err) {
+      // Don't set error state for 401 - let the interceptor handle redirect
+      if (err.response?.status === 401) {
+        // Authentication will be handled by API interceptor
+        return;
+      }
+      setError(err.message || 'Failed to load trades');
+      console.error('Error fetching trades:', err);
+      // Show user-friendly error
+      if (err.code === 'ERR_NETWORK') {
+        addNotification('Cannot connect to backend. Please ensure services are running.', 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const pendingSettlements = useMemo(
-    () => trades.filter((trade) => ['validated', 'matched'].includes(trade.status)).length,
+    () => trades.filter((trade) => ['validated', 'matched', 'settlement_pending'].includes(trade.status)).length,
     [trades]
   );
   const validatedTrades = useMemo(
@@ -90,7 +122,10 @@ export default function TradeOperations() {
       const matchesSearch =
         trade.tradeId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         trade.isin?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        trade.clientId?.toLowerCase().includes(searchTerm.toLowerCase());
+        trade.clientId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        trade.accountId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        trade.cscsRef?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        trade.swiftMessageId?.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesStatus = statusFilter === 'all' ? true : trade.status === statusFilter;
 
@@ -107,45 +142,47 @@ export default function TradeOperations() {
     setFormData((prev) => ({ ...prev, isin: generateFakeISIN() }));
   };
 
-  const handleCaptureTrade = () => {
+  const handleCaptureTrade = async () => {
     const errors = validateTradeInputs(formData);
     setFormErrors(errors);
     if (Object.keys(errors).length) {
       return;
     }
 
-    const quantity = Number(formData.quantity);
-    const price = Number(formData.price);
-    const newTrade = {
-      tradeId: randomId(),
-      clientId: formData.clientId.trim(),
-      isin: formData.isin.trim().toUpperCase(),
-      tradeType: formData.tradeType,
-      tradeDate: formData.tradeDate,
-      settlementDate: formData.settlementDate,
-      quantity,
-      price,
-      totalValue: quantity * price,
-      counterparty: formData.counterparty.trim(),
-      status: 'draft',
-      history: [{ status: 'draft', timestamp: new Date(), note: 'Trade captured' }],
-    };
+    setLoading(true);
+    try {
+      const quantity = Number(formData.quantity);
+      const price = Number(formData.price);
+      const tradeData = {
+        accountId: formData.accountId.trim(),
+        clientId: formData.clientId.trim(),
+        isin: formData.isin.trim().toUpperCase(),
+        tradeType: formData.tradeType,
+        tradeDate: formData.tradeDate,
+        settlementDate: formData.settlementDate,
+        quantity,
+        price,
+        counterpartyId: formData.counterpartyId.trim(),
+        brokerId: formData.counterpartyId.trim(), // Set brokerId automatically from counterpartyId
+        createdBy: 'current_user', // Should come from auth context
+      };
 
-    setTrades((prev) => [newTrade, ...prev]);
-    setFormData(createInitialForm());
-    setFormErrors({});
-    addNotification(`Trade ${newTrade.tradeId} captured`, 'success');
-    recordAudit('captured', newTrade.tradeId, `Created ${newTrade.tradeType} trade for ${newTrade.clientId}`);
+      const newTrade = await tradeService.createTrade(tradeData);
+      setTrades((prev) => [newTrade, ...prev]);
+      setFormData(createInitialForm());
+      setFormErrors({});
+      addNotification(`Trade ${newTrade.tradeId} captured`, 'success');
+      recordAudit('captured', newTrade.tradeId, `Created ${newTrade.tradeType} trade for ${newTrade.clientId}`);
+      await fetchTrades(); // Refresh to get latest data
+    } catch (err) {
+      setError(err.message || 'Failed to create trade');
+      addNotification(`Failed to create trade: ${err.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleSync = () => {
-    setSyncing(true);
-    setTimeout(() => {
-      setSyncing(false);
-      addNotification('CSCS sync completed (mock)', 'success');
-      recordAudit('sync', 'CSCS', 'Mock CSCS synchronization executed');
-    }, 1200);
-  };
+  // Removed handleSync - refresh button now calls fetchTrades
 
   const addNotification = (message, severity = 'info') => {
     setNotifications((prev) => [{ id: randomId(), message, severity, timestamp: new Date() }, ...prev].slice(0, 5));
@@ -169,82 +206,84 @@ export default function TradeOperations() {
     setExceptions((prev) => prev.filter((exc) => exc.id !== id));
   };
 
-  const updateTrade = (tradeId, updater) => {
-    setTrades((prev) =>
-      prev.map((trade) => (trade.tradeId === tradeId ? { ...trade, ...updater(trade) } : trade))
-    );
-  };
+  // Removed updateTrade - now using API calls directly
 
-  const handleValidate = (trade) => {
-    if (trade.quantity > MAX_QUANTITY || trade.totalValue > MAX_VALUE) {
-      raiseException(trade, 'Trade exceeds configured limits');
-      return;
+  const handleValidate = async (trade) => {
+    try {
+      const updatedTrade = await tradeService.validateTrade(trade.tradeId);
+      setTrades((prev) => prev.map((t) => (t.tradeId === trade.tradeId ? updatedTrade : t)));
+      addNotification(`Trade ${trade.tradeId} validated`, 'success');
+      recordAudit('validated', trade.tradeId, 'Trade passed validation checks');
+      await fetchTrades(); // Refresh to get latest status
+    } catch (err) {
+      addNotification(`Failed to validate trade: ${err.message}`, 'error');
+      raiseException(trade, err.message || 'Validation failed');
     }
-    updateTrade(trade.tradeId, (current) => ({
-      ...current,
-      ...appendHistory(current, 'validated', 'Trade validated'),
-    }));
-    addNotification(`Trade ${trade.tradeId} validated`, 'info');
-    recordAudit('validated', trade.tradeId, 'Trade passed validation checks');
   };
 
-  const handleMatch = (trade) => {
-    updateTrade(trade.tradeId, (current) => ({
-      ...current,
-      ...appendHistory(current, 'matched', 'Trade matched via mock FMDQ'),
-    }));
-    addNotification(`Trade ${trade.tradeId} matched`, 'info');
-    recordAudit('matched', trade.tradeId, 'Trade matched stage complete');
+  const handleMatch = async (trade) => {
+    try {
+      const updatedTrade = await tradeService.matchTrade(trade.tradeId);
+      setTrades((prev) => prev.map((t) => (t.tradeId === trade.tradeId ? updatedTrade : t)));
+      addNotification(`Trade ${trade.tradeId} matched`, 'success');
+      recordAudit('matched', trade.tradeId, 'Trade matched stage complete');
+      await fetchTrades();
+    } catch (err) {
+      addNotification(`Failed to match trade: ${err.message}`, 'error');
+    }
   };
 
-  const handleSettle = (trade) => {
-    const swiftId = `SW-${randomId().slice(-6)}`;
-    updateTrade(trade.tradeId, (current) => ({
-      ...current,
-      swiftMessageId: swiftId,
-      ...appendHistory(current, 'settlement_pending', 'Awaiting SWIFT confirmation'),
-    }));
-    addNotification(`SWIFT message ${swiftId} sent for ${trade.tradeId}`, 'info');
-    recordAudit('settlement_initiated', trade.tradeId, `SWIFT message ${swiftId} dispatched`);
-
-    setTimeout(() => {
-      const success = Math.random() > 0.2;
-      if (success) {
-        updateTrade(trade.tradeId, (current) => ({
-          ...current,
-          ...appendHistory(current, 'settled', 'SWIFT confirmation received'),
-        }));
-        addNotification(`Trade ${trade.tradeId} settled successfully`, 'success');
-        recordAudit('settled', trade.tradeId, `SWIFT ${swiftId} confirmed`);
-      } else {
-        updateTrade(trade.tradeId, (current) => ({
-          ...current,
-          ...appendHistory(current, 'failed', 'SWIFT confirmation failed'),
-        }));
-        raiseException(trade, 'SWIFT confirmation failed. Settlement aborted.');
-      }
-    }, 2000);
+  const handleSettle = async (trade) => {
+    try {
+      const updatedTrade = await tradeService.settleTrade(trade.tradeId);
+      setTrades((prev) => prev.map((t) => (t.tradeId === trade.tradeId ? updatedTrade : t)));
+      addNotification(`Trade ${trade.tradeId} settled successfully`, 'success');
+      recordAudit('settled', trade.tradeId, 'Trade settled successfully');
+      await fetchTrades();
+    } catch (err) {
+      addNotification(`Failed to settle trade: ${err.message}`, 'error');
+      raiseException(trade, err.message || 'Settlement failed');
+      await fetchTrades(); // Refresh to see failed status
+    }
   };
 
-  const handleClose = (trade) => {
-    updateTrade(trade.tradeId, (current) => ({
-      ...current,
-      ...appendHistory(current, 'closed', 'Trade archive complete'),
-    }));
-    addNotification(`Trade ${trade.tradeId} closed`, 'success');
-    recordAudit('closed', trade.tradeId, 'Trade lifecycle completed');
+  const handleClose = async (trade) => {
+    try {
+      const updatedTrade = await tradeService.closeTrade(trade.tradeId);
+      setTrades((prev) => prev.map((t) => (t.tradeId === trade.tradeId ? updatedTrade : t)));
+      addNotification(`Trade ${trade.tradeId} closed`, 'success');
+      recordAudit('closed', trade.tradeId, 'Trade lifecycle completed');
+      await fetchTrades();
+    } catch (err) {
+      addNotification(`Failed to close trade: ${err.message}`, 'error');
+    }
   };
 
   const handleDownloadConfirmation = (trade) => {
+    const settlementDate = trade.settlementDate 
+      ? new Date(trade.settlementDate).toLocaleDateString()
+      : 'N/A';
+    const tradeDate = trade.tradeDate 
+      ? new Date(trade.tradeDate).toLocaleDateString()
+      : 'N/A';
     const rows = [
       ['Trade ID', trade.tradeId],
-      ['Client', trade.clientId],
+      ['Account ID', trade.accountId || 'N/A'],
+      ['Client ID', trade.clientId],
       ['ISIN', trade.isin],
-      ['Type', trade.tradeType],
+      ['Type', trade.tradeType?.toUpperCase() || 'N/A'],
+      ['Trade Date', tradeDate],
+      ['Settlement Date', settlementDate],
       ['Quantity', trade.quantity],
-      ['Price', trade.price],
-      ['Value', trade.totalValue],
+      ['Price', currencyFormatter.format(trade.price)],
+      ['Total Value', currencyFormatter.format(trade.totalValue)],
       ['Status', trade.status],
+      ['Settlement Status', trade.settlementStatus || 'N/A'],
+      ['CSCS Reference', trade.cscsRef || 'N/A'],
+      ['SWIFT Message ID', trade.swiftMessageId || 'N/A'],
+      ['Settlement Mode', trade.settlementMode || 'N/A'],
+      ['Counterparty', trade.counterparty || 'N/A'],
+      ['Counterparty ID', trade.counterpartyId || trade.brokerId || 'N/A'],
     ];
     const csv = rows.map((row) => row.join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -305,10 +344,10 @@ export default function TradeOperations() {
           <Button
             variant="outlined"
             startIcon={<RefreshCw size={16} />}
-            onClick={handleSync}
-            disabled={syncing}
+            onClick={fetchTrades}
+            disabled={loading}
           >
-            {syncing ? 'Syncing…' : 'Sync CSCS'}
+            {loading ? 'Loading…' : 'Refresh'}
           </Button>
           <Button variant="contained" startIcon={<Plus size={16} />} onClick={handleCaptureTrade}>
             Quick Capture
@@ -339,6 +378,19 @@ export default function TradeOperations() {
                 <Grid container spacing={2}>
                   <Grid item xs={12} sm={6}>
                     <TextField
+                      label="Account ID"
+                      name="accountId"
+                      value={formData.accountId}
+                      onChange={handleFormChange}
+                      error={Boolean(formErrors.accountId)}
+                      helperText={formErrors.accountId || 'Account where trade will be settled'}
+                      fullWidth
+                      required
+                      placeholder="ACC-CLIENT-XXX-SEC"
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
                       label="Client ID"
                       name="clientId"
                       value={formData.clientId}
@@ -346,6 +398,8 @@ export default function TradeOperations() {
                       error={Boolean(formErrors.clientId)}
                       helperText={formErrors.clientId}
                       fullWidth
+                      required
+                      placeholder="CLIENT-XXX"
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
@@ -410,14 +464,30 @@ export default function TradeOperations() {
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField
+                      select
+                      name="counterpartyId"
                       label="Counterparty"
-                      name="counterparty"
-                      value={formData.counterparty}
+                      value={formData.counterpartyId}
                       onChange={handleFormChange}
-                      error={Boolean(formErrors.counterparty)}
-                      helperText={formErrors.counterparty}
+                      error={Boolean(formErrors.counterpartyId)}
+                      helperText={
+                        formErrors.counterpartyId 
+                          ? formErrors.counterpartyId 
+                          : formData.counterpartyId 
+                            ? `Counterparty ID: ${formData.counterpartyId}` 
+                            : 'Select a counterparty'
+                      }
                       fullWidth
-                    />
+                      required
+                      SelectProps={{ native: true }}
+                    >
+                      <option value="">-- Select Counterparty --</option>
+                      {counterparties.map((cp) => (
+                        <option key={cp.counterpartyId} value={cp.counterpartyId}>
+                          {cp.counterpartyId} - {cp.name}
+                        </option>
+                      ))}
+                    </TextField>
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <TextField
@@ -542,8 +612,10 @@ export default function TradeOperations() {
                 <option value="draft">Draft</option>
                 <option value="validated">Validated</option>
                 <option value="matched">Matched</option>
+                <option value="settlement_pending">Settlement Pending</option>
                 <option value="settled">Settled</option>
                 <option value="failed">Failed</option>
+                <option value="closed">Closed</option>
                 <option value="cancelled">Cancelled</option>
               </TextField>
             </Box>
@@ -556,34 +628,45 @@ export default function TradeOperations() {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Reference</TableCell>
+                  <TableCell>Trade ID</TableCell>
+                  <TableCell>Account</TableCell>
                   <TableCell>Client</TableCell>
                   <TableCell>ISIN</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell align="right">Quantity</TableCell>
                   <TableCell align="right">Price</TableCell>
                   <TableCell align="right">Value</TableCell>
+                  <TableCell>Settlement Date</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell>Settlement Ref</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {filteredTrades.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'hsl(222, 20%, 40%)' }}>
+                    <TableCell colSpan={12} align="center" sx={{ py: 4, color: 'hsl(222, 20%, 40%)' }}>
                       No trades found
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredTrades.map((trade) => {
                     const statusStyle = statusColors[trade.status] || statusColors.draft;
+                    const settlementRef = trade.cscsRef || trade.swiftMessageId || '-';
+                    const settlementDate = trade.settlementDate 
+                      ? new Date(trade.settlementDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                      : '-';
+                    
                     return (
                       <TableRow key={trade.tradeId}>
                         <TableCell sx={{ fontFamily: '"Space Grotesk", sans-serif', fontSize: '0.85rem' }}>
                           {trade.tradeId}
                         </TableCell>
+                        <TableCell sx={{ fontSize: '0.85rem', color: 'hsl(222, 20%, 40%)' }}>
+                          {trade.accountId || '-'}
+                        </TableCell>
                         <TableCell>{trade.clientId}</TableCell>
-                        <TableCell>{trade.isin}</TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{trade.isin}</TableCell>
                         <TableCell>
                           <Chip
                             label={trade.tradeType?.toUpperCase()}
@@ -593,10 +676,13 @@ export default function TradeOperations() {
                         </TableCell>
                         <TableCell align="right">{Number(trade.quantity || 0).toLocaleString()}</TableCell>
                         <TableCell align="right">{currencyFormatter.format(Number(trade.price || 0))}</TableCell>
-                        <TableCell align="right">{currencyFormatter.format(Number(trade.totalValue || 0))}</TableCell>
+                        <TableCell align="right" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600 }}>
+                          {currencyFormatter.format(Number(trade.totalValue || 0))}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.85rem' }}>{settlementDate}</TableCell>
                         <TableCell>
                           <Chip
-                            label={trade.status}
+                            label={trade.status?.replace('_', ' ')}
                             size="small"
                             sx={{
                               background: statusStyle.bg,
@@ -605,6 +691,9 @@ export default function TradeOperations() {
                               textTransform: 'capitalize',
                             }}
                           />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'hsl(222, 20%, 40%)' }}>
+                          {settlementRef}
                         </TableCell>
                         <TableCell align="right">
                           <Stack direction="row" spacing={1} flexWrap="wrap">
@@ -628,9 +717,20 @@ export default function TradeOperations() {
                                 Close
                               </Button>
                             )}
+                            {trade.status === 'settlement_pending' && (
+                              <Button size="small" variant="outlined" onClick={() => handleSettle(trade)}>
+                                Check Settlement
+                              </Button>
+                            )}
+                            {trade.status === 'failed' && (
+                              <Button size="small" color="error" variant="outlined">
+                                View Exception
+                              </Button>
+                            )}
                             <Button
                               size="small"
                               color="secondary"
+                              variant="outlined"
                               startIcon={<FileDown size={14} />}
                               onClick={() => handleDownloadConfirmation(trade)}
                             >
@@ -648,46 +748,87 @@ export default function TradeOperations() {
         </CardContent>
       </Card>
 
-      <Card sx={{ mt: 3 }}>
-        <CardContent>
-          <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 2 }}>
-            Audit Trail
-          </Typography>
-          {auditLogs.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No audit events captured yet.
-            </Typography>
-          ) : (
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Time</TableCell>
-                  <TableCell>Trade ID</TableCell>
-                  <TableCell>Action</TableCell>
-                  <TableCell>Notes</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {auditLogs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell>{log.timestamp.toLocaleTimeString()}</TableCell>
-                    <TableCell>{log.tradeId}</TableCell>
-                    <TableCell>
-                      <Chip
-                        label={log.action}
-                        size="small"
-                        icon={<CheckCircle2 size={12} />}
-                        sx={{ textTransform: 'capitalize' }}
-                      />
-                    </TableCell>
-                    <TableCell>{log.notes}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <Grid container spacing={2} sx={{ mt: 3 }}>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 2 }}>
+                Recent Audit Trail
+              </Typography>
+              {auditLogs.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No audit events captured yet.
+                </Typography>
+              ) : (
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Time</TableCell>
+                      <TableCell>Trade ID</TableCell>
+                      <TableCell>Action</TableCell>
+                      <TableCell>Notes</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {auditLogs.map((log) => (
+                      <TableRow key={log.id}>
+                        <TableCell sx={{ fontSize: '0.85rem' }}>
+                          {log.timestamp?.toLocaleTimeString?.() || new Date(log.timestamp).toLocaleTimeString()}
+                        </TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{log.tradeId}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={log.action}
+                            size="small"
+                            icon={<CheckCircle2 size={12} />}
+                            sx={{ textTransform: 'capitalize' }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.85rem' }}>{log.notes}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 2 }}>
+                Trade Statistics
+              </Typography>
+              <Stack spacing={2}>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Total Trades
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700 }}>
+                    {trades.length}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Pending Settlements
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700, color: 'hsl(38, 92%, 45%)' }}>
+                    {pendingSettlements}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Failed Trades
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700, color: 'hsl(0, 65%, 45%)' }}>
+                    {trades.filter((t) => t.status === 'failed').length}
+                  </Typography>
+                </Box>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
     </Box>
   );
 }
@@ -703,6 +844,7 @@ const createInitialForm = () => {
   const settlement = new Date(tradeDate.getTime() + 2 * 24 * 60 * 60 * 1000);
   const format = (date) => date.toISOString().slice(0, 10);
   return {
+    accountId: '',
     clientId: '',
     isin: '',
     tradeDate: format(tradeDate),
@@ -710,17 +852,18 @@ const createInitialForm = () => {
     tradeType: 'buy',
     quantity: '',
     price: '',
-    counterparty: '',
+    counterpartyId: '',
   };
 };
 
 const validateTradeInputs = (formData) => {
   const errors = {};
+  if (!formData.accountId.trim()) errors.accountId = 'Account ID is required';
   if (!formData.clientId.trim()) errors.clientId = 'Client ID is required';
   if (!formData.isin.trim()) errors.isin = 'ISIN is required';
   if (!formData.tradeDate) errors.tradeDate = 'Trade date is required';
   if (!formData.settlementDate) errors.settlementDate = 'Settlement date is required';
-  if (!formData.counterparty.trim()) errors.counterparty = 'Counterparty is required';
+  if (!formData.counterpartyId || !formData.counterpartyId.trim()) errors.counterpartyId = 'Counterparty is required';
 
   const quantity = Number(formData.quantity);
   const price = Number(formData.price);
@@ -744,44 +887,6 @@ const generateFakeISIN = () => {
   return `${prefix}${body}`;
 };
 
-const generateMockTrades = () => {
-  const clients = ['CL-201', 'CL-202', 'CL-203', 'CL-204', 'CL-205'];
-  const statuses = ['draft', 'validated', 'matched', 'settlement_pending', 'settled', 'closed'];
-  const tradeTypes = ['buy', 'sell'];
-  const counterparties = ['Goldman Sachs', 'JP Morgan', 'Morgan Stanley', 'Credit Suisse', 'Barclays'];
-
-  return Array.from({ length: 12 }, (_, idx) => {
-    const tradeDate = new Date();
-    tradeDate.setDate(tradeDate.getDate() - Math.floor(Math.random() * 30));
-    const settlementDate = new Date(tradeDate);
-    settlementDate.setDate(settlementDate.getDate() + 2);
-    const quantity = Math.floor(Math.random() * 500000) + 10000;
-    const price = Number((Math.random() * 50 + 10).toFixed(2));
-    const status = statuses[Math.floor(Math.random() * statuses.length)];
-
-    return {
-      tradeId: `TRD-${String(idx + 1).padStart(6, '0')}`,
-      clientId: clients[idx % clients.length],
-      isin: generateFakeISIN(),
-      tradeType: tradeTypes[Math.floor(Math.random() * tradeTypes.length)],
-      tradeDate: tradeDate.toISOString().split('T')[0],
-      settlementDate: settlementDate.toISOString().split('T')[0],
-      quantity,
-      price,
-      totalValue: quantity * price,
-      counterparty: counterparties[Math.floor(Math.random() * counterparties.length)],
-      status,
-      history: [
-        { status: 'draft', timestamp: tradeDate, note: 'Trade captured' },
-        ...(status !== 'draft' ? [{ status: 'validated', timestamp: new Date(tradeDate.getTime() + 3600000), note: 'Trade validated' }] : []),
-        ...(['matched', 'settlement_pending', 'settled', 'closed'].includes(status) ? [{ status: 'matched', timestamp: new Date(tradeDate.getTime() + 7200000), note: 'Trade matched' }] : []),
-        ...(['settlement_pending', 'settled', 'closed'].includes(status) ? [{ status: 'settlement_pending', timestamp: new Date(tradeDate.getTime() + 10800000), note: 'SWIFT message sent' }] : []),
-        ...(['settled', 'closed'].includes(status) ? [{ status: 'settled', timestamp: new Date(tradeDate.getTime() + 14400000), note: 'SWIFT confirmation received' }] : []),
-        ...(status === 'closed' ? [{ status: 'closed', timestamp: new Date(tradeDate.getTime() + 18000000), note: 'Trade archived' }] : []),
-      ],
-      swiftMessageId: ['settlement_pending', 'settled', 'closed'].includes(status) ? `SW-${randomId().slice(-6)}` : null,
-    };
-  });
-};
+// Removed generateMockTrades - now using API
 
 

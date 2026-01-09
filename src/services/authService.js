@@ -9,6 +9,7 @@ const MOCK_STAFF_USERS = [
     firstName: 'Admin',
     lastName: 'User',
     role: 'admin',
+    permissions: ['approve_instructions', 'manage_users', 'view_all', 'manage_settings'],
     requiresMFA: false,
   },
   {
@@ -18,6 +19,7 @@ const MOCK_STAFF_USERS = [
     firstName: 'Maker',
     lastName: 'User',
     role: 'maker',
+    permissions: ['create_trades', 'view_trades'],
     requiresMFA: false,
   },
   {
@@ -27,6 +29,7 @@ const MOCK_STAFF_USERS = [
     firstName: 'Checker',
     lastName: 'User',
     role: 'checker',
+    permissions: ['approve_instructions', 'view_all'],
     requiresMFA: true,
   },
   {
@@ -36,6 +39,27 @@ const MOCK_STAFF_USERS = [
     firstName: 'Viewer',
     lastName: 'User',
     role: 'viewer',
+    permissions: [],
+    requiresMFA: false,
+  },
+  {
+    userId: 'USER-EZINNE',
+    email: 'ezinne.elele@fsdh.com',
+    password: 'Ezinne123!',
+    firstName: 'Ezinne',
+    lastName: 'Elele',
+    role: 'checker',
+    permissions: ['approve_instructions', 'view_all'],
+    requiresMFA: false,
+  },
+  {
+    userId: 'USER-ALIU',
+    email: 'aliu.muibi@fsdh.com',
+    password: 'Aliu123!',
+    firstName: 'Aliu',
+    lastName: 'Muibi',
+    role: 'maker',
+    permissions: ['create_trades', 'view_trades'],
     requiresMFA: false,
   },
 ];
@@ -60,6 +84,7 @@ export const authService = {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
+      permissions: user.permissions || [],
     };
     
     localStorage.setItem('token', token);
@@ -87,6 +112,7 @@ export const authService = {
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
+          permissions: user.permissions || [],
         };
         localStorage.setItem('token', authToken);
         localStorage.setItem('user', JSON.stringify(userData));

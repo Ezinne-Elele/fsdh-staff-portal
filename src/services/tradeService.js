@@ -31,6 +31,16 @@ export const tradeService = {
     return response.data;
   },
 
+  async createTrade(tradeData) {
+    const response = await api.post('/api/trades', tradeData);
+    return response.data;
+  },
+
+  async closeTrade(tradeId) {
+    const response = await api.post(`/api/trades/${tradeId}/close`);
+    return response.data;
+  },
+
   async getInstruments(params = {}) {
     const response = await api.get('/api/instruments', { params });
     return response.data;

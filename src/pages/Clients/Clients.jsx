@@ -6,6 +6,10 @@ import {
   Card,
   CardContent,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Grid,
   InputAdornment,
@@ -37,7 +41,8 @@ export default function Clients() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [amlStatus, setAmlStatus] = useState({ checking: false, result: null });
   const [formState, setFormState] = useState(getInitialFormState());
-  const [closureQueue, setClosureQueue] = useState([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [clientType, setClientType] = useState(null); // 'existing' or 'new'
   const [syncState, setSyncState] = useState({ lastRun: null, status: 'idle' });
 
   useEffect(() => {
@@ -73,44 +78,36 @@ export default function Clients() {
     }, 1200);
   };
 
-  const handleOnboard = () => {
-    const newClient = buildClientFromForm(formState, amlStatus.result);
-    setClients((prev) => [newClient, ...prev]);
+  const handleOpenForm = (type) => {
+    setClientType(type);
+    setFormOpen(true);
     setFormState(getInitialFormState());
     setAmlStatus({ checking: false, result: null });
   };
 
+  const handleCloseForm = () => {
+    setFormOpen(false);
+    setClientType(null);
+    setFormState(getInitialFormState());
+    setAmlStatus({ checking: false, result: null });
+  };
+
+  const handleOnboard = () => {
+    const newClient = buildClientFromForm(formState, amlStatus.result, clientType === 'existing');
+    setClients((prev) => [newClient, ...prev]);
+    handleCloseForm();
+  };
+
   const handleRequestClosure = (clientId) => {
+    // Update client status to pending_closure
+    // The actual request will be created in the authorization queue via API
     setClients((prev) =>
       prev.map((client) =>
         client.clientId === clientId ? { ...client, status: 'pending_closure' } : client
       )
     );
-    setClosureQueue((prev) => [
-      ...prev,
-      {
-        requestId: `CL-${Math.floor(Math.random() * 9000 + 1000)}`,
-        clientId,
-        requestedBy: user?.firstName || 'Ops User',
-        timestamp: new Date(),
-        status: 'pending',
-      },
-    ]);
-  };
-
-  const handleClosureDecision = (requestId, decision) => {
-    const request = closureQueue.find((req) => req.requestId === requestId);
-    if (!request) return;
-    setClosureQueue((prev) => prev.map((req) => (req.requestId === requestId ? { ...req, status: decision } : req)));
-    setClients((prev) =>
-      prev.map((client) => {
-        if (client.clientId !== request.clientId) return client;
-        if (decision === 'approved') {
-          return { ...client, status: 'closed' };
-        }
-        return { ...client, status: 'active' };
-      })
-    );
+    // Note: In production, this would call the API to create the closure request
+    alert(`Account closure request for ${clientId} has been submitted to the Authorization Queue.`);
   };
 
   function runFlexcubeSync() {
@@ -124,8 +121,21 @@ export default function Clients() {
     <Box>
       <Header syncState={syncState} onSync={runFlexcubeSync} />
 
+      {canOnboard && (
+        <Box mb={3}>
+          <Button
+            variant="contained"
+            startIcon={<UserPlus size={16} />}
+            onClick={() => setFormOpen(true)}
+            sx={{ mb: 2 }}
+          >
+            Create Client
+          </Button>
+        </Box>
+      )}
+
       <Grid container spacing={2} mb={3}>
-        <Grid item xs={12} md={canOnboard ? 7 : 12}>
+        <Grid item xs={12}>
           <FilterBar
             searchTerm={searchTerm}
             statusFilter={statusFilter}
@@ -133,18 +143,6 @@ export default function Clients() {
             onStatusChange={setStatusFilter}
           />
         </Grid>
-        {canOnboard && (
-          <Grid item xs={12} md={5}>
-            <KycForm
-              formState={formState}
-              onChange={handleFormChange}
-              amlStatus={amlStatus}
-              onValidate={handleValidateKYC}
-              onSubmit={handleOnboard}
-              disabled={!amlStatus.result?.level || amlStatus.result?.message?.includes('manual')}
-            />
-          </Grid>
-        )}
       </Grid>
 
       <Grid container spacing={2}>
@@ -159,8 +157,20 @@ export default function Clients() {
         ))}
       </Grid>
 
-      {canApproveClosure && (
-        <ClosureQueue queue={closureQueue} onDecision={handleClosureDecision} />
+      {/* Client Creation Dialog */}
+      {formOpen && (
+        <ClientCreationDialog
+          open={formOpen}
+          onClose={handleCloseForm}
+          onSelectType={setClientType}
+          clientType={clientType}
+          formState={formState}
+          onChange={handleFormChange}
+          amlStatus={amlStatus}
+          onValidate={handleValidateKYC}
+          onSubmit={handleOnboard}
+          disabled={clientType === 'new' && (!amlStatus.result?.level || amlStatus.result?.message?.includes('manual'))}
+        />
       )}
     </Box>
   );
@@ -246,17 +256,21 @@ function FilterBar({ searchTerm, statusFilter, onSearchChange, onStatusChange })
   );
 }
 
-function KycForm({ formState, onChange, amlStatus, onValidate, onSubmit, disabled }) {
+function KycForm({ formState, onChange, amlStatus, onValidate, onSubmit, disabled, isExisting = false }) {
   return (
-    <Card sx={{ border: '1px solid hsl(214, 32%, 91%)' }}>
-      <CardContent>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-          <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif' }}>
-            KYC & AML Onboarding
-          </Typography>
-          <Chip label={formState.kycTier.toUpperCase()} size="small" />
-        </Stack>
-        <Stack spacing={1.5}>
+    <Box>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif' }}>
+          {isExisting ? 'Onboard Existing Client' : 'KYC & AML Onboarding'}
+        </Typography>
+        {!isExisting && <Chip label={formState.kycTier.toUpperCase()} size="small" />}
+      </Stack>
+      {isExisting && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          This client already has KYC documentation. Basic information only is required.
+        </Alert>
+      )}
+      <Stack spacing={1.5}>
           <TextField
             label="Client Name"
             value={formState.clientName}
@@ -330,30 +344,30 @@ function KycForm({ formState, onChange, amlStatus, onValidate, onSubmit, disable
               <option value="high">High</option>
             </TextField>
           </Stack>
-          <Stack direction="row" spacing={1}>
-            <Button
-              variant="outlined"
-              startIcon={<ShieldCheck size={16} />}
-              onClick={onValidate}
-              disabled={amlStatus.checking || !formState.clientName}
-            >
-              {amlStatus.checking ? 'Checking...' : 'Validate AML/KYC'}
-            </Button>
-            <Button variant="contained" onClick={onSubmit} disabled={disabled}>
-              Onboard Client
-            </Button>
-          </Stack>
-          {amlStatus.result && (
-            <Alert
-              severity={amlStatus.result.message.includes('manual') ? 'warning' : 'success'}
-              icon={<ShieldCheck size={18} />}
-            >
-              {amlStatus.result.message}
-            </Alert>
+          {!isExisting && (
+            <>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="outlined"
+                  startIcon={<ShieldCheck size={16} />}
+                  onClick={onValidate}
+                  disabled={amlStatus.checking || !formState.clientName}
+                >
+                  {amlStatus.checking ? 'Checking...' : 'Validate AML/KYC'}
+                </Button>
+              </Stack>
+              {amlStatus.result && (
+                <Alert
+                  severity={amlStatus.result.message.includes('manual') ? 'warning' : 'success'}
+                  icon={<ShieldCheck size={18} />}
+                >
+                  {amlStatus.result.message}
+                </Alert>
+              )}
+            </>
           )}
         </Stack>
-      </CardContent>
-    </Card>
+    </Box>
   );
 }
 
@@ -440,54 +454,6 @@ function HierarchyCard({ client, canRequestClosure, onRequestClosure }) {
   );
 }
 
-function ClosureQueue({ queue, onDecision }) {
-  return (
-    <Card sx={{ border: '1px solid hsl(214, 32%, 91%)', mt: 3 }}>
-      <CardContent>
-        <Stack direction="row" spacing={1} alignItems="center" mb={1}>
-          <ClipboardList size={18} />
-          <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif' }}>
-            Closure Approvals
-          </Typography>
-        </Stack>
-        {queue.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No pending closures.
-          </Typography>
-        ) : (
-          <Stack spacing={1.5}>
-            {queue.map((request) => (
-              <Box key={request.requestId} sx={{ border: '1px solid hsl(214, 32%, 91%)', borderRadius: 2, p: 1.5 }}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  {request.clientId} • {request.requestId}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  Requested by {request.requestedBy} • {request.timestamp.toLocaleTimeString()}
-                </Typography>
-                <Stack direction="row" spacing={1} mt={1}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => onDecision(request.requestId, 'approved')}
-                  >
-                    Approve
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="text"
-                    onClick={() => onDecision(request.requestId, 'rejected')}
-                  >
-                    Reject
-                  </Button>
-                </Stack>
-              </Box>
-            ))}
-          </Stack>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 function seedClients() {
   return Array.from({ length: 5 }, (_, idx) => ({
@@ -522,12 +488,12 @@ function getInitialFormState() {
   };
 }
 
-function buildClientFromForm(formState, amlResult) {
+function buildClientFromForm(formState, amlResult, isExisting = false) {
   return {
     clientId: `CL-${Math.floor(Math.random() * 900 + 100)}`,
     clientName: formState.clientName,
     status: 'active',
-    kycStatus: formState.kycTier,
+    kycStatus: isExisting ? 'approved' : formState.kycTier, // Existing clients don't need KYC
     portfolioValue: 0,
     cashBalance: 0,
     portfolios: [
@@ -543,4 +509,86 @@ function buildClientFromForm(formState, amlResult) {
     ],
     amlResult,
   };
+}
+
+function ClientCreationDialog({ 
+  open, 
+  onClose, 
+  onSelectType, 
+  clientType, 
+  formState, 
+  onChange, 
+  amlStatus, 
+  onValidate, 
+  onSubmit, 
+  disabled 
+}) {
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>Create Client</DialogTitle>
+      <DialogContent>
+        {!clientType ? (
+          <Box sx={{ py: 3 }}>
+            <Typography variant="body1" sx={{ mb: 3, color: 'text.secondary' }}>
+              Select the type of client you want to onboard:
+            </Typography>
+            <Stack spacing={2}>
+              <Button
+                variant="outlined"
+                size="large"
+                fullWidth
+                onClick={() => onSelectType('existing')}
+                sx={{ py: 2, textAlign: 'left', justifyContent: 'flex-start' }}
+              >
+                <Box sx={{ textAlign: 'left' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    Onboard Existing Client
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Client already has KYC documentation. No KYC validation required.
+                  </Typography>
+                </Box>
+              </Button>
+              <Button
+                variant="outlined"
+                size="large"
+                fullWidth
+                onClick={() => onSelectType('new')}
+                sx={{ py: 2, textAlign: 'left', justifyContent: 'flex-start' }}
+              >
+                <Box sx={{ textAlign: 'left' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                    Onboard New Client
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    New client requires full KYC validation and AML checks.
+                  </Typography>
+                </Box>
+              </Button>
+            </Stack>
+          </Box>
+        ) : (
+          <Box sx={{ mt: 2 }}>
+            <KycForm
+              formState={formState}
+              onChange={onChange}
+              amlStatus={amlStatus}
+              onValidate={onValidate}
+              onSubmit={onSubmit}
+              disabled={clientType === 'new' && disabled}
+              isExisting={clientType === 'existing'}
+            />
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        {clientType && (
+          <Button variant="contained" onClick={onSubmit} disabled={clientType === 'new' && disabled}>
+            Onboard Client
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
+  );
 }

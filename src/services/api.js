@@ -27,10 +27,19 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Only redirect on 401 if it's not a network error and we have a token
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      const token = localStorage.getItem('token');
+      // If we have a token but got 401, it might be expired - redirect to login
+      if (token) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
+    }
+    // For network errors (no response), don't redirect - just log
+    if (!error.response && error.code === 'ERR_NETWORK') {
+      console.error('Network error - backend may not be running:', error.message);
     }
     return Promise.reject(error);
   }

@@ -21,8 +21,8 @@ export const exceptionService = {
     return response.data;
   },
 
-  async approveClosure(exceptionId) {
-    const response = await api.post(`/api/exceptions/${exceptionId}/approve`);
+  async escalateException(exceptionId, reason) {
+    const response = await api.post(`/api/exceptions/${exceptionId}/escalate`, { reason });
     return response.data;
   },
 

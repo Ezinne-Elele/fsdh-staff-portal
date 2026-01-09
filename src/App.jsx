@@ -19,6 +19,8 @@ import Compliance from './pages/Compliance/Compliance';
 import Settings from './pages/Settings/Settings';
 import IncomeTaxProcessing from './pages/IncomeTax/IncomeTaxProcessing';
 import Billing from './pages/Billing/Billing';
+import SettlementAuthorization from './pages/SettlementAuthorization/SettlementAuthorization';
+import AuthorizationQueue from './pages/AuthorizationQueue/AuthorizationQueue';
 
 const PrivateRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -57,6 +59,8 @@ function App() {
         <Route path="reports" element={<Reports />} />
         <Route path="billing" element={<Billing />} />
         <Route path="income-tax" element={<IncomeTaxProcessing />} />
+        <Route path="settlement-authorization" element={<SettlementAuthorization />} />
+        <Route path="authorization-queue" element={<AuthorizationQueue />} />
         <Route path="compliance" element={<Compliance />} />
         <Route path="settings" element={<Settings />} />
       </Route>

@@ -37,6 +37,8 @@ import {
   Bell as NotificationsIcon,
   PiggyBank as IncomeIcon,
   CreditCard as BillingIcon,
+  CheckCircle2 as AuthorizationIcon,
+  FileCheck as SettlementIcon,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -46,7 +48,8 @@ const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/', roles: ['admin', 'maker', 'checker', 'viewer'] },
   { text: 'Trade Operations', icon: <TradeIcon />, path: '/trades', roles: ['admin', 'maker', 'checker', 'viewer'] },
   { text: 'Instrument Coverage', icon: <CorporateIcon />, path: '/instruments', roles: ['admin', 'maker', 'checker', 'viewer'] },
-  { text: 'Instructions', icon: <InstructionsIcon />, path: '/instructions', roles: ['admin', 'maker', 'checker'] },
+  { text: 'Client Instructions', icon: <InstructionsIcon />, path: '/instructions', roles: ['admin', 'maker', 'checker', 'viewer'] },
+  { text: 'Settlement Instructions', icon: <SettlementIcon />, path: '/settlement-authorization', roles: ['admin', 'maker', 'checker', 'viewer'] },
   { text: 'Corporate Actions', icon: <CorporateIcon />, path: '/corporate-actions', roles: ['admin', 'maker', 'checker', 'viewer'] },
   { text: 'Income & Tax', icon: <IncomeIcon />, path: '/income-tax', roles: ['admin', 'checker'] },
   { text: 'Clients', icon: <UsersIcon />, path: '/clients', roles: ['admin', 'maker', 'viewer'] },
@@ -55,6 +58,7 @@ const menuItems = [
   { text: 'Exceptions', icon: <ExceptionsIcon />, path: '/exceptions', roles: ['admin', 'maker', 'checker', 'viewer'] },
   { text: 'Reports', icon: <ReportsIcon />, path: '/reports', roles: ['admin', 'checker', 'viewer'] },
   { text: 'Compliance', icon: <ComplianceIcon />, path: '/compliance', roles: ['admin', 'checker'] },
+  { text: 'Authorization Queue', icon: <AuthorizationIcon />, path: '/authorization-queue', roles: ['admin', 'checker'] },
   { text: 'Users', icon: <UsersIcon />, path: '/users', roles: ['admin'] },
   { text: 'Settings', icon: <SettingsIcon />, path: '/settings', roles: ['admin'] },
 ];
@@ -85,10 +89,23 @@ export default function Layout() {
     navigate('/login');
   };
 
-  // Filter menu items based on user role
-  const filteredMenuItems = menuItems.filter(item => 
-    item.roles.includes(user?.role || 'viewer')
-  );
+  // Filter menu items based on user role and permissions
+  const filteredMenuItems = menuItems.filter(item => {
+    const userRole = user?.role || 'viewer';
+    const userPermissions = user?.permissions || [];
+    
+    // Check role-based access
+    if (item.roles.includes(userRole)) {
+      return true;
+    }
+    
+    // Check permission-based access for Authorization Queue
+    if (item.path === '/authorization-queue' && userPermissions.includes('approve_instructions')) {
+      return true;
+    }
+    
+    return false;
+  });
 
   const drawer = (
     <>

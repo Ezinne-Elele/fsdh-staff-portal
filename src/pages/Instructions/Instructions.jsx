@@ -43,13 +43,22 @@ export default function Instructions() {
     const fetchInstructions = async () => {
     try {
       setLoading(true);
-      const params = filterStatus !== 'all' ? { status: filterStatus } : {};
-        const response = await instructionService.getInstructions(params);
-        const data =
-          response.instructions ||
-          response.data ||
-          (Array.isArray(response) ? response : []);
-        setInstructions(data);
+      // Only fetch pending and approved instructions
+      const params = {};
+      if (filterStatus !== 'all') {
+        params.status = filterStatus;
+      }
+      // Backend will filter to only pending and approved by default
+      const response = await instructionService.getInstructions(params);
+      const data =
+        response.instructions ||
+        response.data ||
+        (Array.isArray(response) ? response : []);
+      // Additional client-side filter to ensure only pending, approved, and rejected
+      const filtered = data.filter(inst => 
+        ['pending_approval', 'submitted', 'pending', 'approved', 'rejected'].includes(inst.status)
+      );
+      setInstructions(filtered);
     } catch (err) {
       setError('Failed to load instructions');
       console.error(err);
@@ -63,11 +72,20 @@ export default function Instructions() {
       draft: 'default',
       submitted: 'primary',
       pending_approval: 'warning',
-      approved: 'info',
+      pending: 'warning', // Alias for pending_approval
+      approved: 'success',
       rejected: 'error',
       completed: 'success',
     };
     return statusMap[status] || 'default';
+  };
+
+  const getDisplayStatus = (status) => {
+    // Map backend status to display status
+    if (status === 'pending_approval' || status === 'submitted') {
+      return 'Pending';
+    }
+    return status?.charAt(0).toUpperCase() + status?.slice(1) || status;
   };
 
   const filteredInstructions = instructions.filter((instruction) => {
@@ -89,18 +107,27 @@ export default function Instructions() {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography 
-          variant="h4"
-          sx={{
-            fontFamily: '"Space Grotesk", sans-serif',
-            color: 'hsl(222, 47%, 11%)',
-            fontWeight: 700,
-          }}
+        <Box>
+          <Typography 
+            variant="h4"
+            sx={{
+              fontFamily: '"Space Grotesk", sans-serif',
+              color: 'hsl(222, 47%, 11%)',
+              fontWeight: 700,
+            }}
+          >
+            Client Instructions
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'hsl(222, 20%, 40%)', mt: 0.5 }}>
+            View client instructions. Approve/reject in Authorization Queue.
+          </Typography>
+        </Box>
+        <Button 
+          variant="outlined" 
+          onClick={() => navigate('/authorization-queue')}
+          sx={{ whiteSpace: 'nowrap' }}
         >
-          Instructions
-        </Typography>
-        <Button variant="contained">
-          New Instruction
+          Go to Authorization Queue
         </Button>
       </Box>
 
@@ -110,14 +137,20 @@ export default function Instructions() {
         </Alert>
       )}
 
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <Typography variant="body2">
+          <strong>Note:</strong> This page displays all client instructions. To approve or reject instructions, 
+          please use the <strong>Authorization Queue</strong> page. Instructions with status "Pending" are awaiting your review.
+        </Typography>
+      </Alert>
+
       <Grid container spacing={2} mb={3}>
         {[
-          { label: 'Draft', value: instructions.filter((i) => i.status === 'draft').length },
-          { label: 'Pending Approval', value: instructions.filter((i) => i.status === 'pending_approval' || i.status === 'submitted').length },
+          { label: 'Pending', value: instructions.filter((i) => i.status === 'pending_approval' || i.status === 'submitted' || i.status === 'pending').length },
           { label: 'Approved', value: instructions.filter((i) => i.status === 'approved').length },
-          { label: 'Completed', value: instructions.filter((i) => i.status === 'completed').length },
+          { label: 'Rejected', value: instructions.filter((i) => i.status === 'rejected').length },
         ].map((item) => (
-          <Grid item xs={12} sm={6} md={3} key={item.label}>
+          <Grid item xs={12} sm={6} md={4} key={item.label}>
             <Card>
               <CardContent>
                 <Typography variant="body2" color="text.secondary">
@@ -164,13 +197,10 @@ export default function Instructions() {
               onChange={(e) => setFilterStatus(e.target.value)}
               sx={{ width: 200 }}
             >
-              <option value="all">All statuses</option>
-              <option value="draft">Draft</option>
-              <option value="submitted">Submitted</option>
-              <option value="pending_approval">Pending Approval</option>
+              <option value="all">All</option>
+              <option value="pending_approval">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
-              <option value="completed">Completed</option>
             </TextField>
           </Box>
 

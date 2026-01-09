@@ -21,8 +21,15 @@ import {
   TableRow,
   TextField,
   Typography,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Collapse,
 } from '@mui/material';
-import { AlertTriangle, CheckCircle2, Clock, FilePlus2, Search } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, FilePlus2, Search, RefreshCw, Filter, X } from 'lucide-react';
+import { exceptionService } from '../../services/exceptionService';
+import { CircularProgress } from '@mui/material';
 
 const severityColors = {
   critical: { bg: 'hsla(0, 65%, 55%, 0.15)', color: 'hsl(0, 65%, 40%)' },
@@ -41,41 +48,87 @@ const CATEGORY_ASSIGNMENTS = {
 
 export default function Exceptions() {
   const [exceptions, setExceptions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [assignedToFilter, setAssignedToFilter] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [slaAlerts, setSlaAlerts] = useState([]);
-  const [dialogState, setDialogState] = useState({ open: false, exception: null, rootCause: '', approver: '' });
+  const [dialogState, setDialogState] = useState({ open: false, exception: null, rootCause: '', resolution: '' });
 
   useEffect(() => {
-    seedExceptions();
-    const timer = setInterval(() => tickSlaTimers(), 10000);
+    fetchExceptions();
+    const timer = setInterval(() => {
+      tickSlaTimers();
+      fetchExceptions(); // Refresh data periodically
+    }, 30000); // Refresh every 30 seconds
     return () => clearInterval(timer);
   }, []);
 
-  const seedExceptions = () => {
-    const seeded = Array.from({ length: 8 }, () => generateException());
-    setExceptions(seeded);
+  const fetchExceptions = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const response = await exceptionService.getExceptions({ page: 1, limit: 100 });
+      const exceptionsData = response.exceptions || response.data || [];
+      
+      // Calculate SLA remaining for each exception
+      const exceptionsWithSLA = exceptionsData.map(exc => {
+        const createdAt = new Date(exc.createdAt);
+        const targetTime = exc.sla?.targetResolutionTime ? new Date(exc.sla.targetResolutionTime) : null;
+        let minutesRemaining = null;
+        
+        if (targetTime && exc.status !== 'resolved') {
+          const now = new Date();
+          const remainingMs = targetTime.getTime() - now.getTime();
+          minutesRemaining = Math.max(0, remainingMs / (1000 * 60));
+        }
+        
+        return {
+          ...exc,
+          createdAt,
+          minutesRemaining,
+          categoryLabel: exc.category?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || exc.category,
+        };
+      });
+      
+      setExceptions(exceptionsWithSLA);
+    } catch (err) {
+      setError(err.message || 'Failed to load exceptions');
+      console.error('Error fetching exceptions:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const tickSlaTimers = () => {
     setExceptions((prev) => {
       const updated = prev.map((exc) => {
-        if (exc.status === 'closed') return exc;
-        const elapsedMinutes = (Date.now() - exc.createdAt.getTime()) / 60000;
-        const remaining = Math.max(exc.slaMinutes - elapsedMinutes, 0);
-        const shouldEscalate = remaining <= 15 && exc.status !== 'escalated';
+        if (exc.status === 'resolved') return exc;
+        
+        const targetTime = exc.sla?.targetResolutionTime ? new Date(exc.sla.targetResolutionTime) : null;
+        let minutesRemaining = null;
+        
+        if (targetTime) {
+          const now = new Date();
+          const remainingMs = targetTime.getTime() - now.getTime();
+          minutesRemaining = Math.max(0, remainingMs / (1000 * 60));
+        }
+        
         return {
           ...exc,
-          minutesRemaining: remaining,
-          status: shouldEscalate && exc.status === 'in_progress' ? 'escalated' : exc.status,
+          minutesRemaining,
         };
       });
 
       setSlaAlerts(
         updated
-          .filter((exc) => exc.status !== 'closed' && exc.minutesRemaining <= 15)
+          .filter((exc) => exc.status !== 'resolved' && exc.minutesRemaining !== null && exc.minutesRemaining <= 15)
           .map((exc) => ({
-            id: exc.id,
+            id: exc.exceptionId,
             message: `${exc.exceptionId} at risk • ${Math.round(exc.minutesRemaining)}m left`,
           }))
       );
@@ -90,59 +143,110 @@ export default function Exceptions() {
         acc[exc.status] = (acc[exc.status] || 0) + 1;
         return acc;
       },
-      { open: 0, in_progress: 0, escalated: 0, closed: 0 }
+      { open: 0, resolved: 0, escalated: 0 }
     );
+  }, [exceptions]);
+
+  // Get unique values for filter options
+  const uniqueStatuses = useMemo(() => {
+    const statuses = [...new Set(exceptions.map(exc => exc.status).filter(Boolean))];
+    return statuses.sort();
+  }, [exceptions]);
+  
+  const uniqueCategories = useMemo(() => {
+    const categories = [...new Set(exceptions.map(exc => exc.category).filter(Boolean))];
+    return categories.sort();
+  }, [exceptions]);
+  
+  const uniqueAssignedTo = useMemo(() => {
+    const assigned = [...new Set(exceptions.map(exc => exc.assignedTo).filter(Boolean))];
+    return assigned.sort();
   }, [exceptions]);
 
   const filteredExceptions = useMemo(() => {
     return exceptions.filter((exc) => {
+      // Search filter
+      const searchLower = searchTerm.toLowerCase();
       const matchesSearch =
-        exc.exceptionId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        exc.categoryLabel.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesSeverity = severityFilter === 'all' ? true : exc.severity === severityFilter;
-      return matchesSearch && matchesSeverity;
+        !searchTerm ||
+        exc.exceptionId?.toLowerCase().includes(searchLower) ||
+        exc.category?.toLowerCase().includes(searchLower) ||
+        exc.description?.toLowerCase().includes(searchLower) ||
+        exc.tradeId?.toLowerCase().includes(searchLower);
+      
+      // Severity filter
+      const matchesSeverity = severityFilter === 'all' || exc.severity === severityFilter;
+      
+      // Status filter
+      const matchesStatus = statusFilter === 'all' || exc.status === statusFilter;
+      
+      // Category filter
+      const matchesCategory = categoryFilter === 'all' || exc.category === categoryFilter;
+      
+      // Assigned To filter
+      const assignedLower = (exc.assignedTo || '').toLowerCase();
+      const matchesAssigned = !assignedToFilter || assignedLower.includes(assignedToFilter.toLowerCase());
+      
+      return matchesSearch && matchesSeverity && matchesStatus && matchesCategory && matchesAssigned;
     });
-  }, [exceptions, searchTerm, severityFilter]);
-
-  const handleAutoCreate = () => {
-    setExceptions((prev) => [generateException(), ...prev]);
+  }, [exceptions, searchTerm, severityFilter, statusFilter, categoryFilter, assignedToFilter]);
+  
+  const clearFilters = () => {
+    setStatusFilter('all');
+    setCategoryFilter('all');
+    setSeverityFilter('all');
+    setAssignedToFilter('');
+    setSearchTerm('');
   };
+  
+  const hasActiveFilters = statusFilter !== 'all' || categoryFilter !== 'all' || severityFilter !== 'all' || assignedToFilter || searchTerm;
 
   const handleRootCause = (exception) => {
     setDialogState({
       open: true,
       exception,
       rootCause: exception.rootCause || '',
-      approver: exception.approvedBy || '',
+      resolution: exception.resolution || '',
     });
   };
 
-  const handleDialogSubmit = () => {
-    setExceptions((prev) =>
-      prev.map((exc) =>
-        exc.id === dialogState.exception.id
-          ? {
-              ...exc,
-              rootCause: dialogState.rootCause,
-              approvedBy: dialogState.approver,
-              status: dialogState.approver ? 'closed' : 'awaiting_approval',
-            }
-          : exc
-      )
-    );
-    setDialogState({ open: false, exception: null, rootCause: '', approver: '' });
+  const handleDialogSubmit = async () => {
+    if (!dialogState.exception || !dialogState.rootCause || !dialogState.resolution) {
+      return;
+    }
+    
+    try {
+      await exceptionService.resolveException(dialogState.exception.exceptionId, {
+        rootCause: dialogState.rootCause,
+        resolution: dialogState.resolution,
+      });
+      await fetchExceptions();
+      setDialogState({ open: false, exception: null, rootCause: '', resolution: '' });
+    } catch (err) {
+      setError(err.message || 'Failed to resolve exception');
+    }
   };
 
   const handleEscalationAcknowledge = (id) => {
-    setExceptions((prev) =>
-      prev.map((exc) => (exc.id === id ? { ...exc, status: 'in_progress', minutesRemaining: exc.minutesRemaining } : exc))
-    );
     setSlaAlerts((prev) => prev.filter((alert) => alert.id !== id));
   };
 
+  if (loading && exceptions.length === 0) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
     <Box>
-      <Header stats={stats} onAutoCreate={handleAutoCreate} />
+      <Header stats={stats} onRefresh={fetchExceptions} />
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
       {slaAlerts.length > 0 && (
         <Alert severity="warning" icon={<Clock size={18} />} sx={{ mb: 2 }}>
           SLA Alerts:{' '}
@@ -157,12 +261,117 @@ export default function Exceptions() {
         </Alert>
       )}
 
-      <FilterBar
-        searchTerm={searchTerm}
-        severityFilter={severityFilter}
-        onSearchChange={setSearchTerm}
-        onSeverityChange={setSeverityFilter}
-      />
+      <Box display="flex" gap={2} mb={2} flexWrap="wrap" alignItems="center">
+        <TextField
+          placeholder="Search by exception ID, category, description, trade ID..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          size="small"
+          sx={{ flexGrow: 1, minWidth: '250px' }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search size={16} />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <Button
+          variant={filtersOpen ? 'contained' : 'outlined'}
+          startIcon={<Filter size={16} />}
+          onClick={() => setFiltersOpen(!filtersOpen)}
+          size="small"
+        >
+          Filters
+        </Button>
+        {hasActiveFilters && (
+          <Button
+            variant="outlined"
+            color="inherit"
+            startIcon={<X size={16} />}
+            onClick={clearFilters}
+            size="small"
+          >
+            Clear
+          </Button>
+        )}
+      </Box>
+
+      {/* Filter Panel */}
+      <Collapse in={filtersOpen}>
+        <Box
+          sx={{
+            p: 2,
+            mb: 2,
+            border: '1px solid hsl(214, 32%, 91%)',
+            borderRadius: 1,
+            backgroundColor: 'hsl(210, 40%, 98%)',
+          }}
+        >
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Status</InputLabel>
+                <Select
+                  value={statusFilter}
+                  label="Status"
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <MenuItem value="all">All Statuses</MenuItem>
+                  {uniqueStatuses.map((status) => (
+                    <MenuItem key={status} value={status}>
+                      {status.charAt(0).toUpperCase() + status.slice(1)}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Category</InputLabel>
+                <Select
+                  value={categoryFilter}
+                  label="Category"
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                >
+                  <MenuItem value="all">All Categories</MenuItem>
+                  {uniqueCategories.map((category) => (
+                    <MenuItem key={category} value={category}>
+                      {category.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Severity</InputLabel>
+                <Select
+                  value={severityFilter}
+                  label="Severity"
+                  onChange={(e) => setSeverityFilter(e.target.value)}
+                >
+                  <MenuItem value="all">All Severities</MenuItem>
+                  <MenuItem value="critical">Critical</MenuItem>
+                  <MenuItem value="high">High</MenuItem>
+                  <MenuItem value="medium">Medium</MenuItem>
+                  <MenuItem value="low">Low</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                label="Assigned To"
+                value={assignedToFilter}
+                onChange={(e) => setAssignedToFilter(e.target.value)}
+                size="small"
+                fullWidth
+                placeholder="Filter by assignee..."
+              />
+            </Grid>
+          </Grid>
+        </Box>
+      </Collapse>
 
       <Card sx={{ border: '1px solid hsl(214, 32%, 91%)', mb: 3 }}>
         <CardContent>
@@ -178,6 +387,7 @@ export default function Exceptions() {
                   <TableCell>Severity</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Assigned</TableCell>
+                  <TableCell>Created At</TableCell>
                   <TableCell>SLA Remaining</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
@@ -185,62 +395,106 @@ export default function Exceptions() {
               <TableBody>
                 {filteredExceptions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                      No exceptions match the current filters.
+                    <TableCell colSpan={8} align="center" sx={{ py: 3, color: 'hsl(222, 20%, 40%)' }}>
+                      {searchTerm || severityFilter !== 'all' ? 'No exceptions match the current filters.' : 'No exceptions found'}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredExceptions.map((exc) => (
-                    <TableRow key={exc.id}>
-                      <TableCell sx={{ fontFamily: '"Space Grotesk", sans-serif' }}>{exc.exceptionId}</TableCell>
-                      <TableCell>{exc.categoryLabel}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={exc.severity}
-                          size="small"
-                          sx={{
-                            background: severityColors[exc.severity]?.bg,
-                            color: severityColors[exc.severity]?.color,
-                            textTransform: 'capitalize',
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={exc.status.replace('_', ' ')}
-                          size="small"
-                          sx={{
-                            background:
-                              exc.status === 'closed'
-                                ? 'hsla(142, 52%, 45%, 0.12)'
-                                : exc.status === 'escalated'
-                                ? 'hsla(0, 65%, 55%, 0.12)'
-                                : 'hsla(221, 83%, 53%, 0.12)',
-                            color:
-                              exc.status === 'closed'
-                                ? 'hsl(142, 52%, 35%)'
-                                : exc.status === 'escalated'
-                                ? 'hsl(0, 65%, 45%)'
-                                : 'hsl(221, 83%, 45%)',
-                            textTransform: 'capitalize',
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>{exc.assignedTo}</TableCell>
-                      <TableCell>
-                        {exc.status === 'closed'
-                          ? 'Closed'
-                          : exc.minutesRemaining <= 0
-                          ? 'Breached'
-                          : `${Math.round(exc.minutesRemaining)} min`}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Button size="small" onClick={() => handleRootCause(exc)}>
-                          {exc.rootCause ? 'Update' : 'Add Root Cause'}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  filteredExceptions.map((exc) => {
+                    const createdAt = exc.createdAt
+                      ? new Date(exc.createdAt).toLocaleDateString('en-GB', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : '-';
+                    
+                    const slaRemaining = exc.status === 'resolved'
+                      ? 'Resolved'
+                      : exc.minutesRemaining === null
+                      ? 'N/A'
+                      : exc.minutesRemaining <= 0
+                      ? 'Breached'
+                      : `${Math.round(exc.minutesRemaining)} min`;
+                    
+                    return (
+                      <TableRow key={exc.exceptionId || exc._id} hover>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                          {exc.exceptionId}
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">
+                            {exc.categoryLabel || exc.category?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={exc.severity}
+                            size="small"
+                            sx={{
+                              background: severityColors[exc.severity]?.bg,
+                              color: severityColors[exc.severity]?.color,
+                              textTransform: 'capitalize',
+                              fontWeight: 600,
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={exc.status}
+                            size="small"
+                            sx={{
+                              background:
+                                exc.status === 'resolved'
+                                  ? 'hsla(142, 52%, 45%, 0.12)'
+                                  : exc.status === 'escalated'
+                                  ? 'hsla(0, 65%, 55%, 0.12)'
+                                  : 'hsla(221, 83%, 53%, 0.12)',
+                              color:
+                                exc.status === 'resolved'
+                                  ? 'hsl(142, 52%, 35%)'
+                                  : exc.status === 'escalated'
+                                  ? 'hsl(0, 65%, 45%)'
+                                  : 'hsl(221, 83%, 45%)',
+                              textTransform: 'capitalize',
+                              fontWeight: 600,
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>{exc.assignedTo || '-'}</TableCell>
+                        <TableCell sx={{ fontSize: '0.85rem', color: 'hsl(222, 20%, 40%)' }}>
+                          {createdAt}
+                        </TableCell>
+                        <TableCell>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              color:
+                                exc.status === 'resolved'
+                                  ? 'hsl(142, 52%, 35%)'
+                                  : exc.minutesRemaining !== null && exc.minutesRemaining <= 0
+                                  ? 'hsl(0, 65%, 45%)'
+                                  : exc.minutesRemaining !== null && exc.minutesRemaining <= 15
+                                  ? 'hsl(38, 92%, 45%)'
+                                  : 'hsl(222, 20%, 40%)',
+                              fontWeight: exc.minutesRemaining !== null && exc.minutesRemaining <= 15 ? 600 : 400,
+                            }}
+                          >
+                            {slaRemaining}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          {exc.status !== 'resolved' && (
+                            <Button size="small" onClick={() => handleRootCause(exc)}>
+                              {exc.rootCause ? 'Update' : 'Resolve'}
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -250,7 +504,7 @@ export default function Exceptions() {
 
       <RootCauseDialog
         state={dialogState}
-        onClose={() => setDialogState({ open: false, exception: null, rootCause: '', approver: '' })}
+        onClose={() => setDialogState({ open: false, exception: null, rootCause: '', resolution: '' })}
         onSubmit={handleDialogSubmit}
         setState={setDialogState}
       />
@@ -258,40 +512,41 @@ export default function Exceptions() {
   );
 }
 
-function Header({ stats, onAutoCreate }) {
+function Header({ stats, onRefresh }) {
   const cards = [
-    { label: 'Open / New', value: stats.open || 0, icon: <FilePlus2 size={18} />, color: 'hsl(221, 83%, 53%)' },
-    { label: 'In Progress', value: stats.in_progress || 0, icon: <Clock size={18} />, color: 'hsl(38, 92%, 50%)' },
+    { label: 'Open', value: stats.open || 0, icon: <FilePlus2 size={18} />, color: 'hsl(221, 83%, 53%)' },
+    { label: 'Resolved', value: stats.resolved || 0, icon: <CheckCircle2 size={18} />, color: 'hsl(142, 52%, 45%)' },
     { label: 'Escalated', value: stats.escalated || 0, icon: <AlertTriangle size={18} />, color: 'hsl(0, 65%, 55%)' },
-    { label: 'Closed', value: stats.closed || 0, icon: <CheckCircle2 size={18} />, color: 'hsl(142, 52%, 45%)' },
   ];
 
   return (
-    <Box
-      display="flex"
-      flexDirection={{ xs: 'column', md: 'row' }}
-      justifyContent="space-between"
-      alignItems={{ xs: 'flex-start', md: 'center' }}
-      gap={2}
-      mb={3}
-    >
-      <Box>
-        <Typography variant="h4" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700 }}>
-          Exception Management
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Auto-generate, assign, and resolve operational exceptions with SLA tracking.
-        </Typography>
+    <Box mb={3}>
+      <Box
+        display="flex"
+        flexDirection={{ xs: 'column', md: 'row' }}
+        justifyContent="space-between"
+        alignItems={{ xs: 'flex-start', md: 'center' }}
+        gap={2}
+        mb={3}
+      >
+        <Box>
+          <Typography variant="h4" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700 }}>
+            Exception Management
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Auto-generate, assign, and resolve operational exceptions with SLA tracking.
+          </Typography>
+        </Box>
+        <Button variant="outlined" onClick={onRefresh} startIcon={<RefreshCw size={16} />}>
+          Refresh
+        </Button>
       </Box>
-      <Button variant="contained" onClick={onAutoCreate} startIcon={<FilePlus2 size={16} />}>
-        Auto-Create Exception
-      </Button>
-      <Grid container spacing={2} sx={{ mt: { xs: 2, md: 0 }, flex: 1 }}>
+      <Grid container spacing={2}>
         {cards.map((card) => (
-          <Grid item xs={6} md={3} key={card.label}>
+          <Grid item xs={12} sm={4} key={card.label}>
             <Card sx={{ border: '1px solid hsl(214, 32%, 91%)' }}>
               <CardContent>
-                <Stack direction="row" spacing={1} alignItems="center">
+                <Stack direction="row" spacing={1} alignItems="center" mb={1}>
                   {card.icon}
                   <Typography variant="caption" color="text.secondary">
                     {card.label}
@@ -309,110 +564,50 @@ function Header({ stats, onAutoCreate }) {
   );
 }
 
-function FilterBar({ searchTerm, severityFilter, onSearchChange, onSeverityChange }) {
-  return (
-    <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} gap={2} mb={3}>
-      <TextField
-        placeholder="Search by exception ID or category..."
-        value={searchTerm}
-        onChange={(e) => onSearchChange(e.target.value)}
-        size="small"
-        fullWidth
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <Search size={16} />
-            </InputAdornment>
-          ),
-        }}
-      />
-      <TextField
-        select
-        SelectProps={{ native: true }}
-        label="Severity"
-        size="small"
-        value={severityFilter}
-        onChange={(e) => onSeverityChange(e.target.value)}
-        sx={{ width: 200 }}
-      >
-        <option value="all">All severities</option>
-        <option value="critical">Critical</option>
-        <option value="high">High</option>
-        <option value="medium">Medium</option>
-        <option value="low">Low</option>
-      </TextField>
-    </Box>
-  );
-}
 
 function RootCauseDialog({ state, setState, onClose, onSubmit }) {
   return (
     <Dialog open={state.open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Root Cause & Closure Approval</DialogTitle>
+      <DialogTitle>Resolve Exception</DialogTitle>
       <DialogContent>
         {state.exception && (
           <Stack spacing={2} mt={1}>
-            <Typography variant="body2">
-              Exception: {state.exception.exceptionId} • {state.exception.categoryLabel}
+            <Typography variant="body2" sx={{ color: 'hsl(222, 20%, 40%)' }}>
+              Exception: <strong>{state.exception.exceptionId}</strong> • {state.exception.categoryLabel || state.exception.category}
             </Typography>
             <TextField
-              label="Root Cause"
+              label="Root Cause *"
               multiline
               minRows={3}
               value={state.rootCause}
               onChange={(e) => setState((prev) => ({ ...prev, rootCause: e.target.value }))}
-              helperText="Required before closure"
+              helperText="Required to resolve exception"
+              required
             />
             <TextField
-              label="Approved By"
-              placeholder="e.g. Head of Ops"
-              value={state.approver}
-              onChange={(e) => setState((prev) => ({ ...prev, approver: e.target.value }))}
-              helperText="Enter approver to finalize closure"
+              label="Resolution *"
+              multiline
+              minRows={3}
+              value={state.resolution}
+              onChange={(e) => setState((prev) => ({ ...prev, resolution: e.target.value }))}
+              helperText="Describe how the exception was resolved"
+              required
             />
           </Stack>
         )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={onSubmit} disabled={!state.rootCause}>
-          {state.approver ? 'Close Exception' : 'Submit for Approval'}
+        <Button 
+          variant="contained" 
+          onClick={onSubmit} 
+          disabled={!state.rootCause || !state.resolution}
+        >
+          Resolve Exception
         </Button>
       </DialogActions>
     </Dialog>
   );
 }
 
-function generateException() {
-  const categories = [
-    { key: 'settlements', label: 'Settlements' },
-    { key: 'reconciliation', label: 'Reconciliation' },
-    { key: 'corporate_actions', label: 'Corporate Actions' },
-    { key: 'custody', label: 'Custody Operations' },
-  ];
-  const severities = ['critical', 'high', 'medium', 'low'];
-  const category = categories[Math.floor(Math.random() * categories.length)];
-  const severity = severities[Math.floor(Math.random() * severities.length)];
-  const slaMinutes = severity === 'critical' ? 60 : severity === 'high' ? 120 : 240;
-  const createdAt = new Date(Date.now() - Math.random() * 60 * 60 * 1000);
-
-  return {
-    id: randomId(),
-    exceptionId: `EXC-${Math.floor(Math.random() * 99999).toString().padStart(5, '0')}`,
-    category: category.key,
-    categoryLabel: category.label,
-    severity,
-    status: 'in_progress',
-    assignedTo: CATEGORY_ASSIGNMENTS[category.key] || CATEGORY_ASSIGNMENTS.default,
-    createdAt,
-    slaMinutes,
-    minutesRemaining: slaMinutes - (Date.now() - createdAt.getTime()) / 60000,
-    rootCause: '',
-    approvedBy: '',
-  };
-}
-
-function randomId() {
-  return `EX-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-}
 
