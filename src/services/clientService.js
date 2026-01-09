@@ -31,8 +31,8 @@ export const clientService = {
     return response.data;
   },
 
-  async requestClosure(clientId) {
-    const response = await api.post(`/api/clients/${clientId}/request-closure`);
+  async requestClosure(clientId, reason) {
+    const response = await api.post(`/api/clients/${clientId}/request-closure`, { reason });
     return response.data;
   },
 

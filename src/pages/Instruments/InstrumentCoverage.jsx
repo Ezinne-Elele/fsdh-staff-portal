@@ -6,6 +6,10 @@ import {
   CardContent,
   Typography,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   Chip,
   TextField,
   InputAdornment,
@@ -104,6 +108,7 @@ export default function InstrumentCoverage() {
   const [formErrors, setFormErrors] = useState({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
   useEffect(() => {
     const loadInstruments = async () => {
@@ -192,18 +197,164 @@ export default function InstrumentCoverage() {
     setInstruments((prev) => [newInstrument, ...prev]);
     setFormData(initialFormState());
     setFormErrors({});
+    setIsAddDialogOpen(false);
   };
 
   const filtered = instruments.sort((a, b) => b.lastUpdated - a.lastUpdated);
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700, color: 'hsl(222, 47%, 11%)', mb: 1 }}>
-        Instrument Coverage
-      </Typography>
-      <Typography variant="body2" color="text.secondary" mb={3}>
-        Manage multi-asset instruments and simulate market data feeds.
-      </Typography>
+      <Dialog
+        open={isAddDialogOpen}
+        onClose={() => setIsAddDialogOpen(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700 }}>
+          Add Instrument
+        </DialogTitle>
+        <DialogContent dividers>
+          <Box component="form" id="add-instrument-form" onSubmit={handleAddInstrument}>
+            <Grid container spacing={2} sx={{ mt: 0.5 }}>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Instrument Name"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.name)}
+                  helperText={formErrors.name}
+                  fullWidth
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="ISIN"
+                  name="isin"
+                  value={formData.isin}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.isin)}
+                  helperText={formErrors.isin}
+                  fullWidth
+                  required
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Button size="small" onClick={handleGenerateIsin} startIcon={<Hash size={14} />}>
+                          Generate
+                        </Button>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  select
+                  SelectProps={{ native: true }}
+                  label="Asset Type"
+                  name="assetType"
+                  value={formData.assetType}
+                  onChange={handleFormChange}
+                  fullWidth
+                  required
+                >
+                  <option value="equity">Equity</option>
+                  <option value="bond">Bond</option>
+                  <option value="commodity">Commodity</option>
+                  <option value="derivative">Derivative</option>
+                  <option value="alternative">Alternative</option>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Market"
+                  name="market"
+                  value={formData.market}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.market)}
+                  helperText={formErrors.market}
+                  fullWidth
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Price Source"
+                  name="priceSource"
+                  value={formData.priceSource}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.priceSource)}
+                  helperText={formErrors.priceSource}
+                  fullWidth
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Currency"
+                  name="currency"
+                  value={formData.currency}
+                  onChange={handleFormChange}
+                  fullWidth
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Price"
+                  name="price"
+                  type="number"
+                  value={formData.price}
+                  onChange={handleFormChange}
+                  error={Boolean(formErrors.price)}
+                  helperText={formErrors.price}
+                  fullWidth
+                  required
+                />
+              </Grid>
+            </Grid>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+          <Button type="submit" form="add-instrument-form" variant="contained">
+            Add Instrument
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} gap={2} mb={3}>
+        <Box>
+          <Typography variant="h4" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 700, color: 'hsl(222, 47%, 11%)', mb: 0.5 }}>
+            Instrument Coverage
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Manage multi-asset instruments and simulate market data feeds.
+          </Typography>
+        </Box>
+        <Box display="flex" gap={1}>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshCw size={16} />}
+            onClick={() => window.location.reload()}
+            disabled={loading}
+          >
+            {loading ? 'Loading…' : 'Refresh'}
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Hash size={16} />}
+            onClick={() => {
+              setFormData(initialFormState());
+              setFormErrors({});
+              setIsAddDialogOpen(true);
+            }}
+          >
+            Add Instrument
+          </Button>
+        </Box>
+      </Box>
 
       {error && (
         <Alert severity="warning" sx={{ mb: 3 }}>
@@ -230,122 +381,13 @@ export default function InstrumentCoverage() {
       </Grid>
 
       <Grid container spacing={2} mb={3}>
-        <Grid item xs={12} md={7}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 2 }}>
-                Add Instrument
-              </Typography>
-              <Box component="form" onSubmit={handleAddInstrument}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Instrument Name"
-                      name="name"
-                      value={formData.name}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.name)}
-                      helperText={formErrors.name}
-                      fullWidth
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="ISIN"
-                      name="isin"
-                      value={formData.isin}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.isin)}
-                      helperText={formErrors.isin}
-                      fullWidth
-                      InputProps={{
-                        endAdornment: (
-                          <InputAdornment position="end">
-                            <Button size="small" onClick={handleGenerateIsin} startIcon={<Hash size={14} />}>
-                              Generate
-                            </Button>
-                          </InputAdornment>
-                        ),
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      select
-                      SelectProps={{ native: true }}
-                      label="Asset Type"
-                      name="assetType"
-                      value={formData.assetType}
-                      onChange={handleFormChange}
-                      fullWidth
-                    >
-                      <option value="equity">Equity</option>
-                      <option value="bond">Bond</option>
-                      <option value="commodity">Commodity</option>
-                      <option value="derivative">Derivative</option>
-                      <option value="alternative">Alternative</option>
-                    </TextField>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Market"
-                      name="market"
-                      value={formData.market}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.market)}
-                      helperText={formErrors.market}
-                      fullWidth
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Price Source"
-                      name="priceSource"
-                      value={formData.priceSource}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.priceSource)}
-                      helperText={formErrors.priceSource}
-                      fullWidth
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Currency"
-                      name="currency"
-                      value={formData.currency}
-                      onChange={handleFormChange}
-                      fullWidth
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      label="Price"
-                      name="price"
-                      type="number"
-                      value={formData.price}
-                      onChange={handleFormChange}
-                      error={Boolean(formErrors.price)}
-                      helperText={formErrors.price}
-                      fullWidth
-                    />
-                  </Grid>
-                </Grid>
-                <Stack direction="row" justifyContent="flex-end" mt={2}>
-                  <Button type="submit" variant="contained">
-                    Add Instrument
-                  </Button>
-                </Stack>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
         <Grid item xs={12} md={5}>
           <Card>
             <CardContent>
               <Typography variant="h6" sx={{ fontFamily: '"Space Grotesk", sans-serif', fontWeight: 600, mb: 2 }}>
                 Price Feeds
               </Typography>
-              <Stack spacing={1}>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                 {sources.map((source) => (
                   <Button
                     key={source.key}
